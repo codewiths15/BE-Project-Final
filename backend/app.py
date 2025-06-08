@@ -8,13 +8,17 @@ import pandas as pd
 from flask_pymongo import PyMongo
 from flask_cors import CORS
 from scipy.spatial import distance
-
+from werkzeug.security import generate_password_hash, check_password_hash
+import jwt
+import datetime
 app = Flask(__name__)
 CORS(app)
 
 # ✅ MongoDB Configuration
+app.config['SECRET_KEY'] = 'yoogapose_secret_key' 
 app.config["MONGO_URI"] = "mongodb+srv://chetan0412:Chetan%40123@crm.2wmjl.mongodb.net/yoga_pose_db?retryWrites=true&w=majority"
 mongo = PyMongo(app)
+users = mongo.db.users
 poses_collection = mongo.db.poses
 
 # ✅ Load MoveNet Thunder Model
@@ -33,10 +37,55 @@ KEYPOINT_LABELS = [
     "Left Wrist", "Right Wrist", "Left Hip", "Right Hip",
     "Left Knee", "Right Knee", "Left Ankle", "Right Ankle"
 ]
+# Signup Route
+@app.route('/signup', methods=['POST'])
+def signup():
+    data = request.get_json()
+    name = data.get("name")
+    email = data.get("email")
+    password = data.get("password")
+    age = data.get("age")
 
+    if users.find_one({"email": email}):
+        return jsonify({"message": "User already exists"}), 400
+
+    hashed_password = generate_password_hash(password)
+    users.insert_one({
+        "name": name,
+        "email": email,
+        "password": hashed_password,
+        "age": age
+    })
+
+    return jsonify({"message": "User registered successfully!","user":data}), 201
+
+@app.route('/login', methods=['POST'])
+def login():
+    data = request.get_json()
+    email = data.get("email")
+    password = data.get("password")
+
+    user = users.find_one({"email": email})
+    if user and check_password_hash(user["password"], password):
+        # Create payload with expiration
+        payload = {
+            "user_id": str(user["_id"]),
+            "email": user["email"],
+            "exp": datetime.datetime.utcnow() + datetime.timedelta(hours=24)
+        }
+        token = jwt.encode(payload, app.config['SECRET_KEY'], algorithm='HS256')
+
+        return jsonify({
+            "message": "Login successful!",
+            "token": token,
+            "name": user["name"]
+        }), 200
+    else:
+        return jsonify({"message": "Invalid email or password"}), 401
 # ✅ Function to extract keypoints
 
 def extract_keypoints_from_image(image):
+
     img = cv2.resize(image, (256, 256))
     img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
     img = np.expand_dims(img, axis=0).astype(np.int32)
@@ -167,7 +216,9 @@ def predict_pose():
             }), 400
 
         keypoints = keypoints.reshape(1, -1)
+        console.log("keypoints extracted from image", keypoints)
         predicted_pose = classifier.predict(keypoints)[0]
+        console.log("predicted pose", predicted_pose)
         corrections, rating, detailed_corrections = calculate_corrections(keypoints.flatten(), ideal_keypoints.get(predicted_pose, {}))
 
         result = {
@@ -182,6 +233,7 @@ def predict_pose():
         
         inserted = poses_collection.insert_one(result)
         result["_id"] = str(inserted.inserted_id) 
+        console.log("pose inserted in db ")
         return jsonify(result)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
