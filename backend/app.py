@@ -11,6 +11,7 @@ from scipy.spatial import distance
 from werkzeug.security import generate_password_hash, check_password_hash
 import jwt
 import datetime
+
 app = Flask(__name__)
 CORS(app)
 
@@ -216,9 +217,9 @@ def predict_pose():
             }), 400
 
         keypoints = keypoints.reshape(1, -1)
-        console.log("keypoints extracted from image", keypoints)
+        
         predicted_pose = classifier.predict(keypoints)[0]
-        console.log("predicted pose", predicted_pose)
+        
         corrections, rating, detailed_corrections = calculate_corrections(keypoints.flatten(), ideal_keypoints.get(predicted_pose, {}))
 
         result = {
@@ -233,7 +234,7 @@ def predict_pose():
         
         inserted = poses_collection.insert_one(result)
         result["_id"] = str(inserted.inserted_id) 
-        console.log("pose inserted in db ")
+        
         return jsonify(result)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
